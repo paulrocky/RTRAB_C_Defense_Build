@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
                     supabase = supabase,
                     onNavigateToReport = { currentScreen = "REPORT" },
                     onNavigateToAlerts = { currentScreen = "MODERATOR_DASHBOARD" },
+                    onNavigateToHotlines = { currentScreen = "HOTLINES" }, // FIXED: Passed the new navigation parameter
                     onLogout = {
                         lifecycleScope.launch { try { supabase.auth.signOut() } catch (e: Exception) { } }
                         currentScreen = "LOGIN"
@@ -109,6 +110,9 @@ class MainActivity : ComponentActivity() {
                         lifecycleScope.launch { try { supabase.auth.signOut() } catch (e: Exception) { } }
                         currentScreen = "LOGIN"
                     }
+                )
+                "HOTLINES" -> EmergencyHotlinesScreen(
+                    onNavigateBack = { currentScreen = "HOME" } // ADDED: Direct routing back to map screen
                 )
             }
         }

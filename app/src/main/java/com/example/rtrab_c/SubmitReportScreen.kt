@@ -127,9 +127,10 @@ fun SubmitReportScreen(
     }
 
     val isOnline by rememberNetworkStatus()
-    var expanded by remember { mutableStateOf(false) }
+
+    // --- UPDATED HAZARD STATE VARIABLES ---
     var selectedCategory by remember { mutableStateOf("Landslide") }
-    val categories = listOf("Landslide", "Flood", "Fire", "Accident", "Other")
+    var otherCategoryText by remember { mutableStateOf("") }
 
     val executeSearch = { query: String ->
         coroutineScope.launch(Dispatchers.IO) {
@@ -232,12 +233,65 @@ fun SubmitReportScreen(
         Text("Report Hazard", color = Color(0xFF00695C), fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
         Spacer(modifier = Modifier.height(8.dp))
 
-        Box {
-            Button(onClick = { expanded = true }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)), shape = RoundedCornerShape(4.dp)) { Text("$selectedCategory  ▼", color = Color.White, fontWeight = FontWeight.Bold) }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                categories.forEach { category -> DropdownMenuItem(text = { Text(category, fontWeight = FontWeight.Bold) }, onClick = { selectedCategory = category; expanded = false }) }
+        // --- NEW HAZARD BUTTON GRID ---
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Row 1: Flood & Fire
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { selectedCategory = "Flood" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (selectedCategory == "Flood") Color(0xFF1E88E5) else Color(0xFFE0E0E0)),
+                    shape = RoundedCornerShape(8.dp)
+                ) { Text("Flood", color = if (selectedCategory == "Flood") Color.White else Color.DarkGray, fontWeight = FontWeight.Bold) }
+
+                Button(
+                    onClick = { selectedCategory = "Fire" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (selectedCategory == "Fire") Color(0xFFE53935) else Color(0xFFE0E0E0)),
+                    shape = RoundedCornerShape(8.dp)
+                ) { Text("Fire", color = if (selectedCategory == "Fire") Color.White else Color.DarkGray, fontWeight = FontWeight.Bold) }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Row 2: Landslide & Accident
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { selectedCategory = "Landslide" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (selectedCategory == "Landslide") Color(0xFF8D6E63) else Color(0xFFE0E0E0)),
+                    shape = RoundedCornerShape(8.dp)
+                ) { Text("Landslide", color = if (selectedCategory == "Landslide") Color.White else Color.DarkGray, fontWeight = FontWeight.Bold) }
+
+                Button(
+                    onClick = { selectedCategory = "Accident" },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = if (selectedCategory == "Accident") Color(0xFFFB8C00) else Color(0xFFE0E0E0)),
+                    shape = RoundedCornerShape(8.dp)
+                ) { Text("Accident", color = if (selectedCategory == "Accident") Color.White else Color.DarkGray, fontWeight = FontWeight.Bold) }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Row 3: Other
+            Button(
+                onClick = { selectedCategory = "Other" },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = if (selectedCategory == "Other") Color(0xFF546E7A) else Color(0xFFE0E0E0)),
+                shape = RoundedCornerShape(8.dp)
+            ) { Text("Other", color = if (selectedCategory == "Other") Color.White else Color.DarkGray, fontWeight = FontWeight.Bold) }
+
+            // Hidden Text Box (Only shows if "Other" is tapped)
+            if (selectedCategory == "Other") {
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = otherCategoryText,
+                    onValueChange = { otherCategoryText = it },
+                    placeholder = { Text("Specify the hazard (e.g., Live Wire)", color = Color.Gray) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(4.dp)
+                )
             }
         }
+        // --- END HAZARD BUTTON GRID ---
 
         Spacer(modifier = Modifier.height(40.dp))
         Text("Photo Evidence", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
@@ -276,6 +330,13 @@ fun SubmitReportScreen(
                 val currentLon = (mapViewReference?.mapCenter as? GeoPoint)?.longitude ?: 120.5930
                 val email = supabase.auth.currentUserOrNull()?.email ?: "Unknown"
 
+                // Determine final category string to push to DB
+                val finalCategoryToSave = if (selectedCategory == "Other" && otherCategoryText.isNotBlank()) {
+                    otherCategoryText
+                } else {
+                    selectedCategory
+                }
+
                 coroutineScope.launch(Dispatchers.IO) {
                     var fetchedAddress = "GPS: $currentLat, $currentLon"
 
@@ -302,7 +363,7 @@ fun SubmitReportScreen(
                         }
 
                         val newReport = HazardReport(
-                            type = selectedCategory,
+                            type = finalCategoryToSave, // Updated reference
                             description = description,
                             latitude = currentLat,
                             longitude = currentLon,
@@ -321,6 +382,7 @@ fun SubmitReportScreen(
                                 isSubmitting = false
                                 Toast.makeText(context, "Uploaded to City Servers!", Toast.LENGTH_SHORT).show()
                                 description = ""
+                                otherCategoryText = ""
                                 capturedBitmap = null
                                 onNavigateHome()
                             }
@@ -358,7 +420,7 @@ fun SubmitReportScreen(
                                 val dbHelper = OfflineDatabaseHelper(context)
                                 val db = dbHelper.writableDatabase
                                 val values = ContentValues().apply {
-                                    put("type", selectedCategory)
+                                    put("type", finalCategoryToSave) // Updated reference
                                     put("description", description)
                                     put("latitude", currentLat)
                                     put("longitude", currentLon)
@@ -373,6 +435,7 @@ fun SubmitReportScreen(
                                 isSubmitting = false
                                 Toast.makeText(context, "Saved Image & Data Offline!", Toast.LENGTH_LONG).show()
                                 description = ""
+                                otherCategoryText = ""
                                 capturedBitmap = null
                                 onNavigateHome()
                             } catch (e: Exception) {

@@ -54,6 +54,7 @@ fun PublicRiskMapScreen(
     supabase: SupabaseClient,
     onNavigateToReport: () -> Unit,
     onNavigateToAlerts: () -> Unit,
+    onNavigateToHotlines: () -> Unit, // ADDED THIS PARAMETER FOR NAVIGATION
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -187,9 +188,20 @@ fun PublicRiskMapScreen(
                                 Toast.makeText(context, "Acquiring GPS signal... Please wait.", Toast.LENGTH_SHORT).show()
                             }
                         }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text("📍 Locate Me", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.DarkGray)
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // 4. NEW: Emergency Hotlines Button
+                    Box(modifier = Modifier
+                        .background(Color(0xFFE53935), shape = RoundedCornerShape(4.dp)) // Red color for emergency
+                        .clickable { onNavigateToHotlines() }
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(" Hotlines", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
                     }
                 }
             }

@@ -7,6 +7,8 @@ import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.*
 
 // --- Android & System Imports ---
+import android.content.Intent
+import android.net.Uri
 import android.view.MotionEvent
 import android.widget.Toast
 import androidx.compose.foundation.Image
@@ -62,7 +64,7 @@ fun ModeratorDashboardScreen(
 
     var allReports by remember { mutableStateOf(listOf<HazardReport>()) }
     var showAnalyticsDialog by remember { mutableStateOf(false) }
-    var showAuditDialog by remember { mutableStateOf(false) } // <-- ADDED: Trigger for the new audit popup
+    var showAuditDialog by remember { mutableStateOf(false) }
     var mapReference by remember { mutableStateOf<MapView?>(null) }
 
     LaunchedEffect(Unit) {
@@ -115,7 +117,6 @@ fun ModeratorDashboardScreen(
             }
             Spacer(modifier = Modifier.height(24.dp))
 
-            // <-- ADDED: The new split buttons for Analytics and User Audit
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { showAnalyticsDialog = true },
@@ -123,24 +124,22 @@ fun ModeratorDashboardScreen(
                     shape = RoundedCornerShape(4.dp),
                     modifier = Modifier.weight(1f).height(45.dp)
                 ) {
-                    // Separated the Emoji and Text so they can have different sizes
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("📊", fontSize = 18.sp) // Bigger shape/emoji
-                        Spacer(modifier = Modifier.width(6.dp)) // Small gap between them
+                        Text("📊", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text("ANALYTICS", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
 
                 Button(
                     onClick = { showAuditDialog = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00796B)), // Matching your screenshot color
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00796B)),
                     shape = RoundedCornerShape(4.dp),
                     modifier = Modifier.weight(1f).height(45.dp)
                 ) {
-                    // Separated the Emoji and Text so they can have different sizes
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🛡️", fontSize = 18.sp) // Bigger shape/emoji
-                        Spacer(modifier = Modifier.width(6.dp)) // Small gap between them
+                        Text("🛡️", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text("USER AUDIT", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
@@ -212,7 +211,6 @@ fun ModeratorDashboardScreen(
                     },
                     update = { mapView ->
                         mapView.overlays.clear()
-                        // Tactical Map only shows Active/Pending issues to keep it clean
                         allReports.filter { it.status == "PENDING" || it.status == "VERIFIED" }.forEach { report ->
                             val marker = Marker(mapView)
                             marker.position = GeoPoint(report.latitude, report.longitude)
@@ -301,7 +299,7 @@ fun ModeratorDashboardScreen(
                                 Text(report.description, fontSize = 15.sp, color = Color.DarkGray)
 
                                 if (report.address.isNotEmpty()) {
-                                    Text("📍 ${report.address}", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(vertical = 4.dp))
+                                    Text("📍 ${report.address}", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
                                 }
 
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -310,6 +308,9 @@ fun ModeratorDashboardScreen(
 
                                 Spacer(modifier = Modifier.height(12.dp))
 
+                                // ==========================================
+                                // ROW 1: PRIMARY ACTION BUTTONS
+                                // ==========================================
                                 if (report.status == "PENDING") {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Button(
@@ -327,7 +328,8 @@ fun ModeratorDashboardScreen(
                                                 }
                                             },
                                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF57C00)),
-                                            modifier = Modifier.weight(1f)
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(4.dp)
                                         ) { Text("VERIFY & DISPATCH", fontWeight = FontWeight.Bold, fontSize = 10.sp) }
 
                                         Button(
@@ -345,7 +347,8 @@ fun ModeratorDashboardScreen(
                                                 }
                                             },
                                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF757575)),
-                                            modifier = Modifier.weight(1f)
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(4.dp)
                                         ) { Text("REJECT", fontWeight = FontWeight.Bold, fontSize = 10.sp) }
                                     }
                                 } else if (report.status == "VERIFIED") {
@@ -364,11 +367,37 @@ fun ModeratorDashboardScreen(
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(4.dp)
                                     ) { Text("MARK AS RESOLVED (FIXED)", fontWeight = FontWeight.Bold) }
                                 } else {
                                     Box(Modifier.fillMaxWidth().background(Color(0xFFF5F5F5), RoundedCornerShape(4.dp)).padding(8.dp), contentAlignment = Alignment.Center) {
                                         Text("🔒 This report has been closed and archived.", color = Color.Gray, fontSize = 11.sp)
+                                    }
+                                }
+
+                                // ==========================================
+                                // ROW 2: NAVIGATION BUTTON (At the very bottom)
+                                // ==========================================
+                                if (report.status == "PENDING" || report.status == "VERIFIED") {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Button(
+                                        onClick = {
+                                            val gmmIntentUri = Uri.parse("google.navigation:q=${report.latitude},${report.longitude}")
+                                            val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
+                                            mapIntent.setPackage("com.google.android.apps.maps")
+                                            if (mapIntent.resolveActivity(context.packageManager) != null) {
+                                                context.startActivity(mapIntent)
+                                            } else {
+                                                Toast.makeText(context, "Google Maps is not installed.", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE3F2FD)), // Light blue background
+                                        modifier = Modifier.fillMaxWidth().height(35.dp),
+                                        contentPadding = PaddingValues(0.dp),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text("NAVIGATE TO HAZARD", color = Color(0xFF1565C0), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -436,7 +465,6 @@ fun ModeratorDashboardScreen(
         )
     }
 
-    // <-- ADDED: The new Citizen Trust & Audit Log Pop-up
     if (showAuditDialog) {
         data class AuditRecord(val email: String, val total: Int, val spam: Int, val firstDate: Long)
 
