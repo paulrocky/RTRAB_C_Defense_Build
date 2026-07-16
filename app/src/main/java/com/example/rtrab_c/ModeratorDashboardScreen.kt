@@ -2,6 +2,7 @@ package com.example.rtrab_c
 
 // --- Supabase Imports ---
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.*
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.*
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -53,6 +56,7 @@ import org.osmdroid.views.overlay.Marker
 // ==========================================
 // SCREEN: MODERATOR DASHBOARD
 // ==========================================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModeratorDashboardScreen(
     supabase: SupabaseClient,
@@ -67,6 +71,14 @@ fun ModeratorDashboardScreen(
     var showAuditDialog by remember { mutableStateOf(false) }
     var mapReference by remember { mutableStateOf<MapView?>(null) }
 
+    // --- MENU & PROFILE STATES ---
+    var showMenu by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
+    var currentUserProfile by remember { mutableStateOf<FullUserProfile?>(null) }
+
+    val currentUserId = supabase.auth.currentUserOrNull()?.id ?: ""
+    val currentUserEmail = supabase.auth.currentUserOrNull()?.email ?: "No Email"
+
     LaunchedEffect(Unit) {
         try {
             allReports = supabase.from("reports")
@@ -75,6 +87,18 @@ fun ModeratorDashboardScreen(
                 .sortedByDescending { it.timestamp }
         } catch (e: Exception) {
             Toast.makeText(context, "Failed to load reports: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+
+        // Fetch the full ERD user profile for moderator
+        if (currentUserId.isNotEmpty()) {
+            try {
+                val userData = supabase.from("users")
+                    .select { filter { eq("id", currentUserId) } }
+                    .decodeSingleOrNull<FullUserProfile>()
+                currentUserProfile = userData
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -105,6 +129,7 @@ fun ModeratorDashboardScreen(
         .background(Color.White)
         .padding(16.dp)) {
         item {
+            // --- TOP HEADER ROW WITH NEW 3-DOTS MENU ---
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Image(painter = painterResource(id = R.drawable.rtrab_logo), contentDescription = "Logo", modifier = Modifier.size(70.dp))
@@ -112,6 +137,35 @@ fun ModeratorDashboardScreen(
                     Column {
                         Text("RTRAB-C", color = Color(0xFF2E7D32), fontWeight = FontWeight.ExtraBold, fontSize = 20.sp)
                         Text("Baguio Real-Time Risk\nAssessment", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold, fontSize = 14.sp, lineHeight = 16.sp)
+                    }
+                }
+
+                // 3-DOTS OVERFLOW MENU
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(imageVector = Icons.Default.MoreVert, contentDescription = "Menu Options", tint = Color.DarkGray)
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.background(Color.White)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("👤 View Profile", fontWeight = FontWeight.Bold) },
+                            onClick = { showMenu = false; showProfileDialog = true }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🔑 Reset Password", fontWeight = FontWeight.Bold) },
+                            onClick = {
+                                showMenu = false
+                                Toast.makeText(context, "Reset Password feature coming soon!", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("🚪 Logout", color = Color.Red, fontWeight = FontWeight.ExtraBold) },
+                            onClick = { showMenu = false; onLogout() }
+                        )
                     }
                 }
             }
@@ -179,7 +233,6 @@ fun ModeratorDashboardScreen(
                     Text("Moderator Dashboard", color = Color(0xFF00897B), fontWeight = FontWeight.Bold, fontSize = 22.sp)
                     Text("Review and verify community submitted hazard reports", color = Color.DarkGray, fontSize = 11.sp)
                 }
-                Text("Logout", color = Color.Red, fontSize = 12.sp, modifier = Modifier.clickable { onLogout() }.padding(8.dp))
             }
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -520,6 +573,110 @@ fun ModeratorDashboardScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showAuditDialog = false }) { Text("CLOSE", fontWeight = FontWeight.Bold) }
+            }
+        )
+    }
+
+    // ==========================================
+    // ERD PROFILE DIALOG WITH EDIT NAME FEATURE
+    // ==========================================
+    if (showProfileDialog) {
+        var isEditing by remember { mutableStateOf(false) }
+        var editName by remember { mutableStateOf(currentUserProfile?.name ?: "") }
+        var isSaving by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { if (!isSaving) showProfileDialog = false },
+            title = { Text("Moderator Profile", fontWeight = FontWeight.ExtraBold, color = Color(0xFF154360)) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Account Details", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text("Email:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(currentUserEmail, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (isEditing) {
+                        OutlinedTextField(
+                            value = editName,
+                            onValueChange = { editName = it },
+                            label = { Text("Full Name") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isSaving
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    } else {
+                        Text("Name:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(currentUserProfile?.name ?: "Unknown User", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    Text("Contact Info:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(currentUserProfile?.contact_info ?: "Not registered", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text("System Role:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(currentUserProfile?.role ?: "MODERATOR", color = Color(0xFFF57C00), fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text("Registration Date:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(currentUserProfile?.created_at?.take(10) ?: "Unknown Date", fontSize = 14.sp)
+                }
+            },
+            confirmButton = {
+                if (isEditing) {
+                    Button(
+                        onClick = {
+                            if (editName.isNotBlank()) {
+                                isSaving = true
+                                coroutineScope.launch {
+                                    try {
+                                        // Update the Name field in Supabase
+                                        supabase.from("users").update({
+                                            set("name", editName)
+                                        }) {
+                                            filter { eq("id", currentUserId) }
+                                        }
+                                        // Update Local UI instantly
+                                        currentUserProfile = currentUserProfile?.copy(name = editName)
+                                        isEditing = false
+                                        Toast.makeText(context, "Profile Name Updated!", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Update Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    } finally {
+                                        isSaving = false
+                                    }
+                                }
+                            } else {
+                                Toast.makeText(context, "Name cannot be empty.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                        enabled = !isSaving
+                    ) {
+                        Text(if (isSaving) "SAVING..." else "SAVE", fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    TextButton(onClick = { showProfileDialog = false }) {
+                        Text("CLOSE", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                if (isEditing) {
+                    TextButton(onClick = { isEditing = false }, enabled = !isSaving) {
+                        Text("CANCEL", color = Color.Gray)
+                    }
+                } else {
+                    TextButton(onClick = {
+                        isEditing = true
+                        editName = currentUserProfile?.name ?: ""
+                    }) {
+                        Text("EDIT NAME", color = Color(0xFF154360), fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         )
     }

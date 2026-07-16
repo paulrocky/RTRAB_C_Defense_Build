@@ -18,6 +18,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,6 +39,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 
+// --- Serialization Import (CRITICAL FOR DATABASE PARSING) ---
+import kotlinx.serialization.Serializable
+
 // --- OsmDroid Imports ---
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
@@ -47,14 +52,26 @@ import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
 // ==========================================
-// SCREEN: PUBLIC RISK MAP (SUPABASE PORT)
+// DATA MODEL FOR PROFILE (Matches your ERD)
+// ==========================================
+@Serializable
+data class FullUserProfile(
+    val id: String,
+    val name: String? = null,
+    val role: String? = null,
+    val contact_info: String? = null,
+    val created_at: String? = null
+)
+
+// ==========================================
+// SCREEN: PUBLIC RISK MAP
 // ==========================================
 @Composable
 fun PublicRiskMapScreen(
     supabase: SupabaseClient,
     onNavigateToReport: () -> Unit,
     onNavigateToAlerts: () -> Unit,
-    onNavigateToHotlines: () -> Unit, // ADDED THIS PARAMETER FOR NAVIGATION
+    onNavigateToHotlines: () -> Unit,
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -68,9 +85,14 @@ fun PublicRiskMapScreen(
     var dangerWarning by remember { mutableStateOf("") }
     var hasLocationPermission by remember { mutableStateOf(false) }
 
-    val currentUserId = supabase.auth.currentUserOrNull()?.id ?: ""
+    // --- MENU & PROFILE STATES ---
+    var showMenu by remember { mutableStateOf(false) }
+    var showProfileDialog by remember { mutableStateOf(false) }
+    var currentUserProfile by remember { mutableStateOf<FullUserProfile?>(null) }
 
-    // 1. Permission Launcher with Settings Redirect
+    val currentUserId = supabase.auth.currentUserOrNull()?.id ?: ""
+    val currentUserEmail = supabase.auth.currentUserOrNull()?.email ?: "No Email"
+
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
         hasLocationPermission = perms[android.Manifest.permission.ACCESS_FINE_LOCATION] == true || perms[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
 
@@ -86,24 +108,28 @@ fun PublicRiskMapScreen(
     LaunchedEffect(Unit) {
         permissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
 
+        // Fetch the full ERD user profile
         if (currentUserId.isNotEmpty()) {
             try {
-                val userData = supabase.from("users").select { filter { eq("id", currentUserId) } }.decodeSingleOrNull<UserRole>()
-                val role = userData?.role
-                isModerator = (role == "MODERATOR")
-            } catch (e: Exception) { }
+                val userData = supabase.from("users")
+                    .select { filter { eq("id", currentUserId) } }
+                    .decodeSingleOrNull<FullUserProfile>()
+
+                currentUserProfile = userData
+                isModerator = (userData?.role == "MODERATOR")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
 
-        // FIX 1: SORT REPORTS BY NEWEST FIRST
         try {
             activeAlerts = supabase.from("reports")
                 .select()
                 .decodeList<HazardReport>()
-                .sortedByDescending { it.timestamp } // Forces latest reports to the top
+                .sortedByDescending { it.timestamp }
         } catch (e: Exception) { }
     }
 
-    // 2. Exact Firebase "runOnFirstFix" Map Overlay Logic
     LaunchedEffect(hasLocationPermission, mapReference) {
         if (hasLocationPermission && mapReference != null && locationOverlay == null) {
             val provider = GpsMyLocationProvider(context)
@@ -155,27 +181,60 @@ fun PublicRiskMapScreen(
     }
 
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().background(Color.White).verticalScroll(rememberScrollState()).padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(painter = painterResource(id = R.drawable.rtrab_logo), contentDescription = "Logo", modifier = Modifier.size(100.dp))
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text("RTRAB-C", color = Color(0xFF2E7D32), fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)
-                Text("Baguio Real-Time Risk\nAssessment", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 18.sp)
+
+        // --- HEADER WITH 3-DOT MENU ---
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(painter = painterResource(id = R.drawable.rtrab_logo), contentDescription = "Logo", modifier = Modifier.size(70.dp))
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text("RTRAB-C", color = Color(0xFF2E7D32), fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)
+                    Text("Baguio Real-Time Risk\nAssessment", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold, fontSize = 14.sp, lineHeight = 16.sp)
+                }
+            }
+
+            // 3-DOTS MENU REPLACING LOGOUT
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(imageVector = Icons.Default.MoreVert, contentDescription = "Menu Options", tint = Color.DarkGray)
+                }
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                    modifier = Modifier.background(Color.White)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("👤 View Profile", fontWeight = FontWeight.Bold) },
+                        onClick = { showMenu = false; showProfileDialog = true }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("🔑 Reset Password", fontWeight = FontWeight.Bold) },
+                        onClick = {
+                            showMenu = false
+                            Toast.makeText(context, "Reset Password feature coming soon!", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("🚪 Logout", color = Color.Red, fontWeight = FontWeight.ExtraBold) },
+                        onClick = { showMenu = false; onLogout() }
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.height(24.dp))
 
+        // --- MAP CONTROLS ---
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text(currentTime, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.background(Color(0xFF4CAF50), shape = RoundedCornerShape(4.dp)).padding(horizontal = 12.dp, vertical = 4.dp)) {
-                        Text("LIVE MAP", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 10.sp)
+                        Text("LIVE MAP", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // 3. Locate Me Button
                     Box(modifier = Modifier
                         .background(Color(0xFFE0E0E0), shape = RoundedCornerShape(4.dp))
                         .clickable {
@@ -188,24 +247,22 @@ fun PublicRiskMapScreen(
                                 Toast.makeText(context, "Acquiring GPS signal... Please wait.", Toast.LENGTH_SHORT).show()
                             }
                         }
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
                     ) {
-                        Text("📍 Locate Me", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.DarkGray)
+                        Text("📍 Locate Me", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.DarkGray)
                     }
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // 4. NEW: Emergency Hotlines Button
                     Box(modifier = Modifier
-                        .background(Color(0xFFE53935), shape = RoundedCornerShape(4.dp)) // Red color for emergency
+                        .background(Color(0xFFE53935), shape = RoundedCornerShape(4.dp))
                         .clickable { onNavigateToHotlines() }
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
                     ) {
                         Text(" Hotlines", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
                     }
                 }
             }
-            Text("Logout", color = Color.Red, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onLogout() })
         }
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -272,10 +329,7 @@ fun PublicRiskMapScreen(
         } else {
             publicVisibleAlerts.forEach { report ->
                 Card(Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { mapReference?.controller?.animateTo(GeoPoint(report.latitude, report.longitude)); mapReference?.controller?.setZoom(18.0) }, colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))) {
-
-                    // We wrap the AlertItem in a Column so we can put the Time above it
                     Column {
-                        // FIX 2: FORMAT AND DISPLAY TIMESTAMP
                         val sdf = SimpleDateFormat("MMM dd, yyyy • hh:mm a", java.util.Locale.getDefault())
                         val formattedTime = sdf.format(java.util.Date(report.timestamp))
 
@@ -284,7 +338,7 @@ fun PublicRiskMapScreen(
                             color = Color.Gray,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(start = 12.dp, top = 8.dp) // Padded to align with AlertItem text
+                            modifier = Modifier.padding(start = 12.dp, top = 8.dp)
                         )
 
                         val hasAlreadyVoted = report.votedUsers?.contains(currentUserId) == true
@@ -329,5 +383,109 @@ fun PublicRiskMapScreen(
             NavButton("REPORT", bgColor = Color(0xFFE53935), onClick = onNavigateToReport)
             if (isModerator) NavButton("ALERTS", bgColor = Color(0xFFF57C00), onClick = onNavigateToAlerts)
         }
+    }
+
+    // ==========================================
+    // ERD PROFILE DIALOG WITH EDIT NAME FEATURE
+    // ==========================================
+    if (showProfileDialog) {
+        var isEditing by remember { mutableStateOf(false) }
+        var editName by remember { mutableStateOf(currentUserProfile?.name ?: "") }
+        var isSaving by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { if (!isSaving) showProfileDialog = false },
+            title = { Text(if(isModerator) "Moderator Profile" else "Citizen Profile", fontWeight = FontWeight.ExtraBold, color = Color(0xFF154360)) },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Account Details", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text("Email:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(currentUserEmail, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (isEditing) {
+                        OutlinedTextField(
+                            value = editName,
+                            onValueChange = { editName = it },
+                            label = { Text("Full Name") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isSaving
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    } else {
+                        Text("Name:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(currentUserProfile?.name ?: "Unknown User", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    Text("Contact Info:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(currentUserProfile?.contact_info ?: "Not registered", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text("System Role:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(currentUserProfile?.role ?: "CITIZEN", color = if (isModerator) Color(0xFFF57C00) else Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text("Registration Date:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(currentUserProfile?.created_at?.take(10) ?: "Unknown Date", fontSize = 14.sp)
+                }
+            },
+            confirmButton = {
+                if (isEditing) {
+                    Button(
+                        onClick = {
+                            if (editName.isNotBlank()) {
+                                isSaving = true
+                                coroutineScope.launch {
+                                    try {
+                                        // Update the Name field in Supabase
+                                        supabase.from("users").update({
+                                            set("name", editName)
+                                        }) {
+                                            filter { eq("id", currentUserId) }
+                                        }
+                                        // Update Local UI instantly
+                                        currentUserProfile = currentUserProfile?.copy(name = editName)
+                                        isEditing = false
+                                        Toast.makeText(context, "Profile Name Updated!", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Update Failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    } finally {
+                                        isSaving = false
+                                    }
+                                }
+                            } else {
+                                Toast.makeText(context, "Name cannot be empty.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                        enabled = !isSaving
+                    ) {
+                        Text(if (isSaving) "SAVING..." else "SAVE", fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    TextButton(onClick = { showProfileDialog = false }) {
+                        Text("CLOSE", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                if (isEditing) {
+                    TextButton(onClick = { isEditing = false }, enabled = !isSaving) {
+                        Text("CANCEL", color = Color.Gray)
+                    }
+                } else {
+                    TextButton(onClick = {
+                        isEditing = true
+                        editName = currentUserProfile?.name ?: ""
+                    }) {
+                        Text("EDIT NAME", color = Color(0xFF154360), fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        )
     }
 }

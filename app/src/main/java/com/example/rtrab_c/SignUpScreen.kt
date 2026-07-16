@@ -2,9 +2,9 @@ package com.example.rtrab_c
 
 // --- Supabase Imports ---
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.*
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
-import io.github.jan.supabase.postgrest.*
+import io.github.jan.supabase.postgrest.from
 
 // --- Android & System Imports ---
 import android.widget.Toast
@@ -12,6 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,12 +22,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 
+// ==========================================
+// DATA MODEL FOR DATABASE UPSERT
+// ==========================================
+@Serializable
+data class UserProfileToSave(
+    val id: String,
+    val email: String,
+    val name: String,
+    val contact_info: String,
+    val role: String
+)
+
+// ==========================================
+// SCREEN: SIGN UP
+// ==========================================
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SignUpScreen(
     supabase: SupabaseClient,
@@ -35,207 +55,292 @@ fun SignUpScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    // Input States
+    var fullName by remember { mutableStateOf("") }
+    var contactNumber by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var confirmEmail by remember { mutableStateOf("") }
-
     var password by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
-
     var confirmPassword by remember { mutableStateOf("") }
-    var confirmPasswordVisible by remember { mutableStateOf(false) }
-
     var isModerator by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(false) }
-    var showModDialog by remember { mutableStateOf(false) }
-    var modPasscode by remember { mutableStateOf("") }
 
-    val isPasswordValid = password.length >= 6 && password.any { it.isUpperCase() } && password.any { it.isDigit() } && password.any { !it.isLetterOrDigit() }
+    // UI Toggles & States
+    var passwordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
+
+    val themeGreen = Color(0xFF0F8C3B)
 
     Column(
-        Modifier
+        modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
-            .padding(24.dp)
-            .verticalScroll(rememberScrollState()),
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Create Account", color = Color(0xFF2E7D32), fontWeight = FontWeight.ExtraBold, fontSize = 28.sp)
-        Text("Citizen Reporting Portal", color = Color.Gray, fontSize = 16.sp)
-        Spacer(modifier = Modifier.height(32.dp))
 
-        // --- EMAIL FIELD ---
+        Spacer(modifier = Modifier.height(48.dp))
+
+        // --- HEADER (Matches Screenshot Exactly) ---
+        Text(
+            text = "Create Account",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold,
+            color = themeGreen
+        )
+
+        Text(
+            text = "Citizen Reporting Portal",
+            fontSize = 14.sp,
+            color = Color.Gray,
+            modifier = Modifier.padding(top = 4.dp, bottom = 32.dp)
+        )
+
+        // --- ERROR MESSAGE ---
+        if (errorMessage.isNotEmpty()) {
+            Surface(
+                color = Color(0xFFFFEBEE),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                Text(
+                    text = errorMessage,
+                    color = Color.Red,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+
+        // --- INPUT FIELDS ---
+        OutlinedTextField(
+            value = fullName,
+            onValueChange = { fullName = it },
+            placeholder = { Text("Full Name", color = Color.Gray) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(4.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = Color.Gray,
+                focusedBorderColor = themeGreen
+            )
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = contactNumber,
+            onValueChange = { contactNumber = it },
+            placeholder = { Text("Contact Number", color = Color.Gray) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(4.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = Color.Gray,
+                focusedBorderColor = themeGreen
+            )
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            label = { Text("Email Address") },
-            modifier = Modifier.fillMaxWidth()
+            placeholder = { Text("Email Address", color = Color.Gray) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(4.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = Color.Gray,
+                focusedBorderColor = themeGreen
+            )
         )
-        Spacer(modifier = Modifier.height(8.dp))
 
-        // --- CONFIRM EMAIL FIELD ---
+        Spacer(modifier = Modifier.height(12.dp))
+
         OutlinedTextField(
             value = confirmEmail,
             onValueChange = { confirmEmail = it },
-            label = { Text("Confirm Email Address") },
+            placeholder = { Text("Confirm Email Address", color = Color.Gray) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             modifier = Modifier.fillMaxWidth(),
-            isError = email.isNotEmpty() && confirmEmail.isNotEmpty() && email != confirmEmail
+            singleLine = true,
+            shape = RoundedCornerShape(4.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = Color.Gray,
+                focusedBorderColor = themeGreen
+            )
         )
-        Spacer(modifier = Modifier.height(8.dp))
 
-        // --- PASSWORD FIELD ---
+        Spacer(modifier = Modifier.height(12.dp))
+
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("Password (Caps, Num, Special)") },
+            placeholder = { Text("Password (Caps, Num, Special)", color = Color.Gray) },
             visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             trailingIcon = {
                 Text(
                     text = if (passwordVisible) "HIDE" else "SHOW",
-                    color = Color(0xFF2E7D32),
+                    color = themeGreen,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp,
-                    modifier = Modifier
-                        .clickable { passwordVisible = !passwordVisible }
-                        .padding(8.dp)
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // --- CONFIRM PASSWORD FIELD ---
-        OutlinedTextField(
-            value = confirmPassword,
-            onValueChange = { confirmPassword = it },
-            label = { Text("Confirm Password") },
-            visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            trailingIcon = {
-                Text(
-                    text = if (confirmPasswordVisible) "HIDE" else "SHOW",
-                    color = Color(0xFF2E7D32),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .clickable { confirmPasswordVisible = !confirmPasswordVisible }
-                        .padding(8.dp)
+                    modifier = Modifier.clickable { passwordVisible = !passwordVisible }.padding(8.dp)
                 )
             },
             modifier = Modifier.fillMaxWidth(),
-            isError = password.isNotEmpty() && confirmPassword.isNotEmpty() && password != confirmPassword
+            singleLine = true,
+            shape = RoundedCornerShape(4.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = Color.Gray,
+                focusedBorderColor = themeGreen
+            )
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = confirmPassword,
+            onValueChange = { confirmPassword = it },
+            placeholder = { Text("Confirm Password", color = Color.Gray) },
+            visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                Text(
+                    text = if (confirmPasswordVisible) "HIDE" else "SHOW",
+                    color = themeGreen,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    modifier = Modifier.clickable { confirmPasswordVisible = !confirmPasswordVisible }.padding(8.dp)
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = RoundedCornerShape(4.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedBorderColor = Color.Gray,
+                focusedBorderColor = themeGreen
+            )
+        )
+
         Spacer(modifier = Modifier.height(16.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Checkbox(checked = isModerator, onCheckedChange = { if (it) showModDialog = true else isModerator = false }, colors = CheckboxDefaults.colors(checkedColor = Color(0xFFD32F2F)))
-            Text("Register as City Official (Moderator)", fontWeight = FontWeight.Bold)
+        // --- CHECKBOX FOR MODERATOR ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = isModerator,
+                onCheckedChange = { isModerator = it },
+                colors = CheckboxDefaults.colors(checkedColor = themeGreen)
+            )
+            Text(
+                text = "Register as City Official (Moderator)",
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                color = Color.Black
+            )
         }
+
         Spacer(modifier = Modifier.height(24.dp))
 
+        // --- REGISTER BUTTON ---
         Button(
             onClick = {
-                val currentEmail = email.trim()
-                val currentConfirmEmail = confirmEmail.trim()
-                val currentPassword = password
-                val currentConfirmPassword = confirmPassword
+                errorMessage = ""
 
-                // --- VALIDATION CHECKS ---
-                if (currentEmail.isEmpty() || currentConfirmEmail.isEmpty() || currentPassword.isEmpty() || currentConfirmPassword.isEmpty()) {
-                    Toast.makeText(context, "Please fill in all fields.", Toast.LENGTH_LONG).show()
-                    return@Button
-                }
-                if (currentEmail != currentConfirmEmail) {
-                    Toast.makeText(context, "Email addresses do not match.", Toast.LENGTH_LONG).show()
-                    return@Button
-                }
-                if (currentPassword != currentConfirmPassword) {
-                    Toast.makeText(context, "Passwords do not match.", Toast.LENGTH_LONG).show()
-                    return@Button
-                }
-                if (!isPasswordValid) {
-                    Toast.makeText(context, "Invalid Password requirements.", Toast.LENGTH_LONG).show()
+                // 1. Validation
+                if (fullName.isBlank() || contactNumber.isBlank() || email.isBlank() || confirmEmail.isBlank() || password.isBlank() || confirmPassword.isBlank()) {
+                    errorMessage = "Please fill in all fields."
                     return@Button
                 }
 
-                isLoading = true
+                if (email != confirmEmail) {
+                    errorMessage = "Email addresses do not match."
+                    return@Button
+                }
+
+                if (password != confirmPassword) {
+                    errorMessage = "Passwords do not match."
+                    return@Button
+                }
+
+                if (password.length < 6) {
+                    errorMessage = "Password must be at least 6 characters."
+                    return@Button
+                }
+
+                val assignedRole = if (isModerator) "MODERATOR" else "CITIZEN"
+
+                // 2. Perform Supabase Registration
                 coroutineScope.launch {
+                    isLoading = true
                     try {
-                        // 1. Sign Up in Supabase Auth
                         supabase.auth.signUpWith(Email) {
-                            this.email = currentEmail
-                            this.password = currentPassword
+                            this.email = email
+                            this.password = password
                         }
 
-                        // 2. Insert record into 'users' table using the correct Data Class
-                        val user = supabase.auth.currentUserOrNull()
-                        if (user != null) {
-                            val roleStr = if (isModerator) "MODERATOR" else "CITIZEN"
-                            val newUserRole = UserRole(id = user.id, email = currentEmail, role = roleStr)
+                        val userId = supabase.auth.currentUserOrNull()?.id
 
-                            supabase.from("users").insert(newUserRole)
+                        if (userId != null) {
+                            val newDbProfile = UserProfileToSave(
+                                id = userId,
+                                email = email,
+                                name = fullName,
+                                contact_info = contactNumber,
+                                role = assignedRole
+                            )
 
-                            isLoading = false
-                            Toast.makeText(context, "Account Created!", Toast.LENGTH_SHORT).show()
-                            onSignUpSuccess(if (isModerator) "MODERATOR_DASHBOARD" else "HOME")
+                            supabase.from("users").upsert(newDbProfile)
+
+                            val toastMsg = if (assignedRole == "MODERATOR") "Moderator Account Created!" else "Account Created!"
+                            Toast.makeText(context, toastMsg, Toast.LENGTH_LONG).show()
+
+                            onSignUpSuccess("HOME")
+                        } else {
+                            throw Exception("Failed to retrieve user ID after signup.")
                         }
+
                     } catch (e: Exception) {
+                        errorMessage = e.message ?: "An unexpected error occurred."
+                    } finally {
                         isLoading = false
-                        Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                     }
                 }
             },
             modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+            colors = ButtonDefaults.buttonColors(containerColor = themeGreen),
+            shape = RoundedCornerShape(50), // Fully rounded pill shape matching the image
             enabled = !isLoading
-        ) { Text(if (isLoading) "REGISTERING..." else "REGISTER", fontWeight = FontWeight.Bold) }
+        ) {
+            Text(
+                text = if (isLoading) "REGISTERING..." else "REGISTER",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = Color.White
+            )
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Already have an account? Login", color = Color(0xFF1976D2), modifier = Modifier.clickable { onNavigateToLogin() })
-    }
 
-    // Passcode Dialog
-    if (showModDialog) {
-        AlertDialog(
-            onDismissRequest = {
-                showModDialog = false
-                isModerator = false
-            },
-            title = { Text("Official Verification", fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text("Please enter the LGU authorization code to register as a moderator.")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = modPasscode,
-                        onValueChange = { modPasscode = it },
-                        label = { Text("Passcode") },
-                        visualTransformation = PasswordVisualTransformation()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        // Corrected Capstone Passcode
-                        if (modPasscode == "RtrabcPhenix") {
-                            showModDialog = false
-                            isModerator = true
-                            Toast.makeText(context, "Code Accepted", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Invalid Code", Toast.LENGTH_SHORT).show()
-                            isModerator = false
-                            showModDialog = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
-                ) { Text("Verify") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showModDialog = false
-                    isModerator = false
-                }) { Text("Cancel", color = Color.Red) }
-            }
+        // --- BACK TO LOGIN LINK ---
+        Text(
+            text = "Already have an account? Login",
+            color = Color(0xFF0066CC),
+            fontSize = 13.sp,
+            modifier = Modifier.clickable { onNavigateToLogin() }
         )
+
+        Spacer(modifier = Modifier.height(32.dp))
     }
 }
