@@ -616,18 +616,25 @@ fun ModeratorDashboardScreen(
         )
     }
 
+    // ==========================================
+    // UPDATED AUDIT DIALOG
+    // ==========================================
     if (showAuditDialog) {
-        data class AuditRecord(val email: String, val total: Int, val spam: Int, val firstDate: Long)
+        // 1. Ensure AuditRecord captures the ID
+        data class AuditRecord(val id: String, val email: String, val total: Int, val spam: Int, val firstDate: Long)
 
-        val userStats = allReports.groupBy { it.reporterEmail }.map { (email, reports) ->
+        val userStats = allReports.groupBy { it.reporterEmail }.mapNotNull { (email, reports) ->
+            // --- NEW: Use empty string if missing, so old reports still show up in the UI
+            val reporterId = reports.firstOrNull()?.reporterId ?: ""
+
             val total = reports.size
             val spamCount = reports.count { it.status == "REJECTED" }
             val firstDate = reports.minOfOrNull { it.timestamp } ?: System.currentTimeMillis()
 
-            AuditRecord(email ?: "Unknown User", total, spamCount, firstDate)
+            AuditRecord(reporterId, email ?: "Unknown User", total, spamCount, firstDate)
         }.sortedByDescending { it.spam }
 
-        // Local state to instantly hide the block button after clicking, without requiring a refresh
+        // Local state to instantly hide the block button after clicking
         var newlyBannedEmails by remember { mutableStateOf(setOf<String>()) }
 
         AlertDialog(
@@ -642,7 +649,6 @@ fun ModeratorDashboardScreen(
                         Text("No user data available.")
                     } else {
                         userStats.forEach { record ->
-
                             val isBannedNow = newlyBannedEmails.contains(record.email)
 
                             Card(
@@ -687,18 +693,25 @@ fun ModeratorDashboardScreen(
                                         Button(
                                             onClick = {
                                                 coroutineScope.launch {
+                                                    // --- NEW SAFETY CHECK ---
+                                                    if (record.id.isBlank()) {
+                                                        Toast.makeText(context, "Cannot block: This is an old report missing a User ID.", Toast.LENGTH_LONG).show()
+                                                        return@launch
+                                                    }
+
                                                     try {
-                                                        // Update the database to lock the user out
+                                                        // TARGET THE 'id' COLUMN IN THE USERS TABLE
                                                         supabase.from("users").update({
                                                             set("role", "BANNED")
                                                         }) {
-                                                            filter { eq("email", record.email) }
+                                                            filter { eq("id", record.id) }
                                                         }
+
                                                         // Update UI instantly
                                                         newlyBannedEmails = newlyBannedEmails + record.email
                                                         Toast.makeText(context, "User successfully blocked.", Toast.LENGTH_SHORT).show()
                                                     } catch (e: Exception) {
-                                                        Toast.makeText(context, "Error blocking user: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(context, "Error blocking user: ${e.message}", Toast.LENGTH_LONG).show()
                                                     }
                                                 }
                                             },

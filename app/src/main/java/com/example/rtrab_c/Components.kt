@@ -51,7 +51,8 @@ data class HazardReport(
     val status: String = "",
     val upvotes: Int = 0,
     val votedUsers: List<String> = emptyList(),
-    val imageUrl: String? = null
+    val imageUrl: String? = null,
+    val reporterId: String? = null
 )
 
 @Serializable

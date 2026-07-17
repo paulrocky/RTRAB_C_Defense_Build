@@ -1,5 +1,13 @@
 package com.example.rtrab_c
 
+// --- Supabase Imports ---
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.postgrest.*
+import io.github.jan.supabase.postgrest.query.filter.*
+
+// --- Android & System Imports ---
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -23,12 +31,15 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.auth.providers.builtin.Email
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
-import io.github.jan.supabase.auth.auth
 
+// --- Serialization Import ---
+import kotlinx.serialization.Serializable
+
+// --- DATA MODEL FOR ROLE CHECK ---
+@Serializable
+data class UserRoleCheck(val role: String? = null)
 
 // --- CRYPTOGRAPHIC HASHING (Secures the password) ---
 fun hashPassword(password: String): String {
@@ -115,15 +126,32 @@ fun LoginScreen(
                 isLoading = true
                 coroutineScope.launch {
                     if (isOnline()) {
-
                         // --- 1. ONLINE MODE: CONNECT TO SUPABASE ---
                         try {
-                            // Correct Supabase Authentication Syntax
-                            supabase.auth.signInWith(io.github.jan.supabase.auth.providers.builtin.Email) {
+                            // Authenticate the user
+                            supabase.auth.signInWith(Email) {
                                 this.email = email
                                 this.password = password
                             }
 
+                            // --- 2. FRONT DOOR SECURITY CHECK ---
+                            // Check if they are banned before letting them in
+                            val currentUserId = supabase.auth.currentUserOrNull()?.id
+                            if (currentUserId != null) {
+                                val userRecord = supabase.from("users")
+                                    .select { filter { eq("id", currentUserId) } }
+                                    .decodeSingleOrNull<UserRoleCheck>()
+
+                                if (userRecord?.role == "BANNED") {
+                                    // Instantly revoke access
+                                    supabase.auth.signOut()
+                                    isLoading = false
+                                    Toast.makeText(context, "Account is banned due to spam reports.", Toast.LENGTH_LONG).show()
+                                    return@launch // Stop execution right here
+                                }
+                            }
+
+                            // --- 3. PROCEED WITH LOGIN (If not banned) ---
                             // SAVE THE SECURE HASH FOR FUTURE OFFLINE USE
                             sharedPref.edit()
                                 .putString("cached_email", email)
@@ -133,6 +161,7 @@ fun LoginScreen(
                             isLoading = false
                             Toast.makeText(context, "Cloud Login Successful", Toast.LENGTH_SHORT).show()
                             onLoginSuccess("HOME")
+
                         } catch (e: Exception) {
                             isLoading = false
                             Toast.makeText(context, "Login Failed: ${e.message}", Toast.LENGTH_LONG).show()

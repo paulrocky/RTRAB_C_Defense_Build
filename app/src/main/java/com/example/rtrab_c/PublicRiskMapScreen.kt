@@ -115,6 +115,15 @@ fun PublicRiskMapScreen(
                     .select { filter { eq("id", currentUserId) } }
                     .decodeSingleOrNull<FullUserProfile>()
 
+                // ==========================================
+                // SPAMMER BLOCK CHECK (ON LOAD)
+                // ==========================================
+                if (userData?.role == "BANNED") {
+                    Toast.makeText(context, "Your account has been blocked by LGU Administrators due to spam.", Toast.LENGTH_LONG).show()
+                    onLogout()
+                    return@LaunchedEffect
+                }
+
                 currentUserProfile = userData
                 isModerator = (userData?.role == "MODERATOR")
             } catch (e: Exception) {
@@ -380,7 +389,18 @@ fun PublicRiskMapScreen(
         Spacer(modifier = Modifier.height(32.dp))
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            NavButton("REPORT", bgColor = Color(0xFFE53935), onClick = onNavigateToReport)
+            // ==========================================
+            // SPAMMER BLOCK CHECK (ON REPORT CLICK)
+            // ==========================================
+            NavButton("REPORT", bgColor = Color(0xFFE53935), onClick = {
+                if (currentUserProfile?.role == "BANNED") {
+                    Toast.makeText(context, "Your account is blocked. You cannot submit reports.", Toast.LENGTH_LONG).show()
+                    onLogout()
+                } else {
+                    onNavigateToReport()
+                }
+            })
+
             if (isModerator) NavButton("ALERTS", bgColor = Color(0xFFF57C00), onClick = onNavigateToAlerts)
         }
     }

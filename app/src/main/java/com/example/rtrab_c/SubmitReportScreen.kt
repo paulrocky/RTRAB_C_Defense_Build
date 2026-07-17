@@ -328,7 +328,10 @@ fun SubmitReportScreen(
                 isSubmitting = true
                 val currentLat = (mapViewReference?.mapCenter as? GeoPoint)?.latitude ?: 16.4164
                 val currentLon = (mapViewReference?.mapCenter as? GeoPoint)?.longitude ?: 120.5930
+
+                // --- NEW: GRAB BOTH EMAIL AND ID ---
                 val email = supabase.auth.currentUserOrNull()?.email ?: "Unknown"
+                val currentUserId = supabase.auth.currentUserOrNull()?.id ?: ""
 
                 // Determine final category string to push to DB
                 val finalCategoryToSave = if (selectedCategory == "Other" && otherCategoryText.isNotBlank()) {
@@ -363,7 +366,7 @@ fun SubmitReportScreen(
                         }
 
                         val newReport = HazardReport(
-                            type = finalCategoryToSave, // Updated reference
+                            type = finalCategoryToSave,
                             description = description,
                             latitude = currentLat,
                             longitude = currentLon,
@@ -373,7 +376,8 @@ fun SubmitReportScreen(
                             status = "PENDING",
                             upvotes = 0,
                             votedUsers = emptyList(),
-                            imageUrl = finalImageUrl
+                            imageUrl = finalImageUrl,
+                            reporterId = currentUserId // --- ATTACH ID TO ONLINE REPORT ---
                         )
 
                         try {
@@ -420,14 +424,15 @@ fun SubmitReportScreen(
                                 val dbHelper = OfflineDatabaseHelper(context)
                                 val db = dbHelper.writableDatabase
                                 val values = ContentValues().apply {
-                                    put("type", finalCategoryToSave) // Updated reference
+                                    put("type", finalCategoryToSave)
                                     put("description", description)
                                     put("latitude", currentLat)
                                     put("longitude", currentLon)
                                     put("address", fetchedAddress)
                                     put("timestamp", System.currentTimeMillis())
                                     put("reporterEmail", email)
-                                    put("imagePath", savedImagePath) // Save the file path!
+                                    put("reporterId", currentUserId) // --- ATTACH ID TO OFFLINE SQLITE ---
+                                    put("imagePath", savedImagePath)
                                 }
                                 db.insert("offline_reports", null, values)
                                 db.close()
@@ -460,15 +465,16 @@ fun SubmitReportScreen(
 // ==========================================
 // OFFLINE SQLITE DATABASE & SYNC ENGINE
 // ==========================================
-// Upgraded to Version 2 to support imagePath column!
-class OfflineDatabaseHelper(context: Context) : SQLiteOpenHelper(context, "RTRABC_Offline.db", null, 2) {
+// Upgraded to Version 3 to support reporterId column!
+class OfflineDatabaseHelper(context: Context) : SQLiteOpenHelper(context, "RTRABC_Offline.db", null, 3) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             "CREATE TABLE offline_reports (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                     "type TEXT, description TEXT, latitude REAL, longitude REAL, " +
                     "address TEXT, timestamp INTEGER, reporterEmail TEXT, " +
-                    "imagePath TEXT)" // NEW: Holds the file cache path
+                    "reporterId TEXT, " + // --- NEW: Holds the Auth UUID ---
+                    "imagePath TEXT)"
         )
     }
 
@@ -492,6 +498,7 @@ class OfflineDatabaseHelper(context: Context) : SQLiteOpenHelper(context, "RTRAB
                 val address = cursor.getString(cursor.getColumnIndexOrThrow("address"))
                 val timestamp = cursor.getLong(cursor.getColumnIndexOrThrow("timestamp"))
                 val email = cursor.getString(cursor.getColumnIndexOrThrow("reporterEmail"))
+                val reporterId = cursor.getString(cursor.getColumnIndexOrThrow("reporterId")) // --- EXTRACT ID FOR SYNC ---
 
                 // Get the saved path
                 val imagePath = cursor.getString(cursor.getColumnIndexOrThrow("imagePath"))
@@ -526,7 +533,8 @@ class OfflineDatabaseHelper(context: Context) : SQLiteOpenHelper(context, "RTRAB
                         status = "PENDING",
                         upvotes = 0,
                         votedUsers = emptyList(),
-                        imageUrl = finalImageUrl // Attach the brand new uploaded Image URL!
+                        imageUrl = finalImageUrl,
+                        reporterId = reporterId // --- ATTACH ID TO SYNCED REPORT ---
                     )
 
                     // 3. PUSH TO DATABASE
