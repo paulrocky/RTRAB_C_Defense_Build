@@ -62,7 +62,11 @@ fun SignUpScreen(
     var confirmEmail by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
+
+    // Moderator Security States
     var isModerator by remember { mutableStateOf(false) }
+    var showSecurityDialog by remember { mutableStateOf(false) }
+    var secretCodeInput by remember { mutableStateOf("") }
 
     // UI Toggles & States
     var passwordVisible by remember { mutableStateOf(false) }
@@ -86,7 +90,7 @@ fun SignUpScreen(
 
         Spacer(modifier = Modifier.height(48.dp))
 
-        // --- HEADER (Matches Screenshot Exactly) ---
+        // --- HEADER ---
         Text(
             text = "Create Account",
             fontSize = 26.sp,
@@ -233,14 +237,21 @@ fun SignUpScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // --- CHECKBOX FOR MODERATOR ---
+        // --- CHECKBOX FOR MODERATOR (TRIGGERS POP-UP) ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Checkbox(
                 checked = isModerator,
-                onCheckedChange = { isModerator = it },
+                onCheckedChange = { checked ->
+                    if (checked) {
+                        secretCodeInput = "" // Clear previous input
+                        showSecurityDialog = true // Show the pop-up
+                    } else {
+                        isModerator = false // Uncheck normally
+                    }
+                },
                 colors = CheckboxDefaults.colors(checkedColor = themeGreen)
             )
             Text(
@@ -285,6 +296,7 @@ fun SignUpScreen(
                 coroutineScope.launch {
                     isLoading = true
                     try {
+                        // Create Auth Account
                         supabase.auth.signUpWith(Email) {
                             this.email = email
                             this.password = password
@@ -301,12 +313,13 @@ fun SignUpScreen(
                                 role = assignedRole
                             )
 
+                            // Save the full details to the 'users' table
                             supabase.from("users").upsert(newDbProfile)
 
-                            val toastMsg = if (assignedRole == "MODERATOR") "Moderator Account Created!" else "Account Created!"
-                            Toast.makeText(context, toastMsg, Toast.LENGTH_LONG).show()
+                            // --- NO MORE EMAIL VERIFICATION PROMPT ---
+                            Toast.makeText(context, "Registration successful!", Toast.LENGTH_SHORT).show()
 
-                            onSignUpSuccess("HOME")
+                            onNavigateToLogin()
                         } else {
                             throw Exception("Failed to retrieve user ID after signup.")
                         }
@@ -320,7 +333,7 @@ fun SignUpScreen(
             },
             modifier = Modifier.fillMaxWidth().height(50.dp),
             colors = ButtonDefaults.buttonColors(containerColor = themeGreen),
-            shape = RoundedCornerShape(50), // Fully rounded pill shape matching the image
+            shape = RoundedCornerShape(50),
             enabled = !isLoading
         ) {
             Text(
@@ -342,5 +355,70 @@ fun SignUpScreen(
         )
 
         Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    // ==========================================
+    // SECURITY POP-UP DIALOG
+    // ==========================================
+    if (showSecurityDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showSecurityDialog = false
+                isModerator = false // Uncheck if they tap outside
+            },
+            title = {
+                Text(
+                    text = "Security Verification",
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF154360)
+                )
+            },
+            text = {
+                Column {
+                    Text("Please enter the LGU authorization code to register as a moderator.", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = secretCodeInput,
+                        onValueChange = { secretCodeInput = it },
+                        placeholder = { Text("Enter code") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = themeGreen,
+                            focusedLabelColor = themeGreen
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (secretCodeInput == "ADMIN2026") {
+                            isModerator = true
+                            showSecurityDialog = false
+                            Toast.makeText(context, "Code Verified", Toast.LENGTH_SHORT).show()
+                        } else {
+                            isModerator = false
+                            showSecurityDialog = false
+                            Toast.makeText(context, "Invalid Authorization Code", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = themeGreen)
+                ) {
+                    Text("VERIFY", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showSecurityDialog = false
+                        isModerator = false // Uncheck if they cancel
+                    }
+                ) {
+                    Text("CANCEL", color = Color.Gray, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 }

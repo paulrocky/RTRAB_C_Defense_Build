@@ -18,6 +18,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -76,6 +77,11 @@ fun ModeratorDashboardScreen(
     var showProfileDialog by remember { mutableStateOf(false) }
     var currentUserProfile by remember { mutableStateOf<FullUserProfile?>(null) }
 
+    // --- HISTORY & FILTER STATES ---
+    var activeTab by remember { mutableStateOf("ACTIVE") }
+    var selectedHazardFilter by remember { mutableStateOf("ALL") }
+    val hazardCategories = listOf("ALL", "Flood", "Fire", "Landslide", "Accident", "Other")
+
     val currentUserId = supabase.auth.currentUserOrNull()?.id ?: ""
     val currentUserEmail = supabase.auth.currentUserOrNull()?.email ?: "No Email"
 
@@ -116,11 +122,29 @@ fun ModeratorDashboardScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Dynamic Stats
     val totalReports = allReports.size
     val pendingReports = allReports.count { it.status == "PENDING" }
     val verifiedReports = allReports.count { it.status == "VERIFIED" }
     val resolvedReports = allReports.count { it.status == "RESOLVED" }
     val rejectedReports = allReports.count { it.status == "REJECTED" }
+
+    // --- FILTER LOGIC ---
+    val displayedReports = allReports.filter { report ->
+        val matchesTab = if (activeTab == "ACTIVE") {
+            report.status == "PENDING" || report.status == "VERIFIED"
+        } else {
+            report.status == "RESOLVED" || report.status == "REJECTED"
+        }
+
+        val matchesHazard = if (selectedHazardFilter == "ALL") {
+            true
+        } else {
+            report.type.equals(selectedHazardFilter, ignoreCase = true)
+        }
+
+        matchesTab && matchesHazard
+    }
 
     LazyColumn(Modifier
         .fillMaxSize()
@@ -129,7 +153,7 @@ fun ModeratorDashboardScreen(
         .background(Color.White)
         .padding(16.dp)) {
         item {
-            // --- TOP HEADER ROW WITH NEW 3-DOTS MENU ---
+            // --- TOP HEADER ROW WITH 3-DOTS MENU ---
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Image(painter = painterResource(id = R.drawable.rtrab_logo), contentDescription = "Logo", modifier = Modifier.size(70.dp))
@@ -140,7 +164,6 @@ fun ModeratorDashboardScreen(
                     }
                 }
 
-                // 3-DOTS OVERFLOW MENU
                 Box {
                     IconButton(onClick = { showMenu = true }) {
                         Icon(imageVector = Icons.Default.MoreVert, contentDescription = "Menu Options", tint = Color.DarkGray)
@@ -277,16 +300,90 @@ fun ModeratorDashboardScreen(
                     }
                 )
             }
+
             Spacer(modifier = Modifier.height(24.dp))
 
-            Text("CITY REPORT DATABASE", color = Color(0xFFE53935), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            // ==========================================
+            // TABS & FILTERS FOR DATABASE
+            // ==========================================
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Card(
+                    modifier = Modifier.weight(1f).height(56.dp).clickable { activeTab = "ACTIVE" },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (activeTab == "ACTIVE") Color(0xFF154360) else Color(0xFFF5F5F5)
+                    ),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("Active Reports", color = if (activeTab == "ACTIVE") Color.White else Color.DarkGray, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Pending & Verified", color = if (activeTab == "ACTIVE") Color.LightGray else Color.Gray, fontSize = 10.sp)
+                    }
+                }
+
+                Card(
+                    modifier = Modifier.weight(1f).height(56.dp).clickable { activeTab = "HISTORY" },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (activeTab == "HISTORY") Color(0xFFE67E22) else Color(0xFFF5F5F5)
+                    ),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("History Logs", color = if (activeTab == "HISTORY") Color.White else Color.DarkGray, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Accomplished & Closed", color = if (activeTab == "HISTORY") Color.White.copy(alpha=0.8f) else Color.Gray, fontSize = 10.sp)
+                    }
+                }
+            }
+
+            Text(
+                text = if (activeTab == "ACTIVE") "CITY REPORT DATABASE" else "ACCOMPLISHED HISTORY",
+                color = Color(0xFFE53935),
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
             Spacer(modifier = Modifier.height(8.dp))
+
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(hazardCategories) { category ->
+                    val isSelected = selectedHazardFilter == category
+                    Surface(
+                        modifier = Modifier.clickable { selectedHazardFilter = category },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isSelected) Color(0xFF0F8C3B) else Color(0xFFE0E0E0),
+                        contentColor = if (isSelected) Color.White else Color.DarkGray
+                    ) {
+                        Text(
+                            text = category.uppercase(),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
         }
 
-        if (allReports.isEmpty()) {
-            item { Text("No reports in the database.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp)) }
+        if (displayedReports.isEmpty()) {
+            item {
+                Text(
+                    text = "No ${if (activeTab == "ACTIVE") "active" else "archived"} reports match your filter.",
+                    color = Color.Gray,
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
+            }
         } else {
-            items(allReports) { report ->
+            items(displayedReports) { report ->
 
                 var showFullImage by remember { mutableStateOf(false) }
 
@@ -305,6 +402,7 @@ fun ModeratorDashboardScreen(
                             "Fire" -> "🔥"
                             "Landslide" -> "🪨"
                             "Accident" -> "💥"
+                            "Other" -> "⚠️"
                             else -> "⚠️"
                         }
 
@@ -430,7 +528,7 @@ fun ModeratorDashboardScreen(
                                 }
 
                                 // ==========================================
-                                // ROW 2: NAVIGATION BUTTON (At the very bottom)
+                                // ROW 2: NAVIGATION BUTTON
                                 // ==========================================
                                 if (report.status == "PENDING" || report.status == "VERIFIED") {
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -445,7 +543,7 @@ fun ModeratorDashboardScreen(
                                                 Toast.makeText(context, "Google Maps is not installed.", Toast.LENGTH_SHORT).show()
                                             }
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE3F2FD)), // Light blue background
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE3F2FD)),
                                         modifier = Modifier.fillMaxWidth().height(35.dp),
                                         contentPadding = PaddingValues(0.dp),
                                         shape = RoundedCornerShape(4.dp)
@@ -529,6 +627,9 @@ fun ModeratorDashboardScreen(
             AuditRecord(email ?: "Unknown User", total, spamCount, firstDate)
         }.sortedByDescending { it.spam }
 
+        // Local state to instantly hide the block button after clicking, without requiring a refresh
+        var newlyBannedEmails by remember { mutableStateOf(setOf<String>()) }
+
         AlertDialog(
             onDismissRequest = { showAuditDialog = false },
             title = { Text("Citizen Trust & Audit Log", fontWeight = FontWeight.ExtraBold, color = Color(0xFF154360)) },
@@ -541,29 +642,73 @@ fun ModeratorDashboardScreen(
                         Text("No user data available.")
                     } else {
                         userStats.forEach { record ->
+
+                            val isBannedNow = newlyBannedEmails.contains(record.email)
+
                             Card(
                                 Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                                colors = CardDefaults.cardColors(containerColor = if (record.spam > 2) Color(0xFFFFEBEE) else Color(0xFFF5F5F5))
+                                colors = CardDefaults.cardColors(containerColor = if (record.spam > 2 || isBannedNow) Color(0xFFFFEBEE) else Color(0xFFF5F5F5))
                             ) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("👤 ${record.email}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Black)
+                                Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                                    // TOP ROW: Details
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text("👤 ${record.email}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Black)
 
-                                        val sdf = SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
-                                        val dateStr = sdf.format(java.util.Date(record.firstDate))
+                                            val sdf = SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
+                                            val dateStr = sdf.format(java.util.Date(record.firstDate))
 
-                                        Text("Active since: $dateStr", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
+                                            Text("Active since: $dateStr", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
+                                        }
+
+                                        Spacer(modifier = Modifier.width(8.dp))
+
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text("Total: ${record.total}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
+                                            Text("Spam: ${record.spam}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (record.spam > 0) Color.Red else Color.DarkGray)
+                                        }
                                     }
 
-                                    Spacer(modifier = Modifier.width(8.dp))
-
-                                    Column(horizontalAlignment = Alignment.End) {
-                                        Text("Total: ${record.total}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
-                                        Text("Spam: ${record.spam}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (record.spam > 0) Color.Red else Color.DarkGray)
+                                    // BOTTOM ROW: Block Button
+                                    if (isBannedNow) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth().background(Color(0xFFFFCDD2), RoundedCornerShape(4.dp)).padding(8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("🔒 ACCOUNT BLOCKED", color = Color(0xFFC62828), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                                        }
+                                    } else if (record.spam > 0) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Button(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    try {
+                                                        // Update the database to lock the user out
+                                                        supabase.from("users").update({
+                                                            set("role", "BANNED")
+                                                        }) {
+                                                            filter { eq("email", record.email) }
+                                                        }
+                                                        // Update UI instantly
+                                                        newlyBannedEmails = newlyBannedEmails + record.email
+                                                        Toast.makeText(context, "User successfully blocked.", Toast.LENGTH_SHORT).show()
+                                                    } catch (e: Exception) {
+                                                        Toast.makeText(context, "Error blocking user: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                                            modifier = Modifier.fillMaxWidth().height(35.dp),
+                                            contentPadding = PaddingValues(0.dp),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text("BLOCK USER", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }
@@ -577,9 +722,6 @@ fun ModeratorDashboardScreen(
         )
     }
 
-    // ==========================================
-    // ERD PROFILE DIALOG WITH EDIT NAME FEATURE
-    // ==========================================
     if (showProfileDialog) {
         var isEditing by remember { mutableStateOf(false) }
         var editName by remember { mutableStateOf(currentUserProfile?.name ?: "") }
@@ -633,13 +775,11 @@ fun ModeratorDashboardScreen(
                                 isSaving = true
                                 coroutineScope.launch {
                                     try {
-                                        // Update the Name field in Supabase
                                         supabase.from("users").update({
                                             set("name", editName)
                                         }) {
                                             filter { eq("id", currentUserId) }
                                         }
-                                        // Update Local UI instantly
                                         currentUserProfile = currentUserProfile?.copy(name = editName)
                                         isEditing = false
                                         Toast.makeText(context, "Profile Name Updated!", Toast.LENGTH_SHORT).show()
