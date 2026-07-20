@@ -1,5 +1,8 @@
 package com.example.rtrab_c
 
+// --- Serialization Import ---
+import kotlinx.serialization.Serializable
+
 // --- Supabase Imports ---
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.*
@@ -53,6 +56,11 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+
+
+// Helper data class to fetch only the emails of banned users
+@Serializable
+data class BannedUserDto(val email: String)
 
 // ==========================================
 // SCREEN: MODERATOR DASHBOARD
@@ -269,6 +277,12 @@ fun ModeratorDashboardScreen(
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { mapContext ->
+
+                        val osmConfig = org.osmdroid.config.Configuration.getInstance()
+                        val prefs = mapContext.getSharedPreferences("osmdroid", android.content.Context.MODE_PRIVATE)
+                        osmConfig.load(mapContext, prefs)
+                        osmConfig.userAgentValue = "RTRABC_Baguio_App/1.0"
+
                         object : MapView(mapContext) {
                             override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
                                 when (ev.actionMasked) {
@@ -278,7 +292,18 @@ fun ModeratorDashboardScreen(
                                 return super.dispatchTouchEvent(ev)
                             }
                         }.apply {
-                            setTileSource(TileSourceFactory.MAPNIK)
+
+                            // --- USE CARTO POSITRON FOR A CLEAN, HIGH-RES DASHBOARD MAP ---
+                            setTileSource(
+                                org.osmdroid.tileprovider.tilesource.XYTileSource(
+                                    "CartoPositron",
+                                    1,
+                                    20,
+                                    256,
+                                    ".png",
+                                    arrayOf("https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/")
+                                )
+                            )
                             setMultiTouchControls(true)
                             controller.setZoom(14.0)
                             controller.setCenter(GeoPoint(16.4164, 120.5930)) // Centered on Baguio
@@ -617,16 +642,35 @@ fun ModeratorDashboardScreen(
     }
 
     // ==========================================
-    // UPDATED AUDIT DIALOG
+    // BRAND NEW AUDIT DIALOG: TABS & FILTERING
     // ==========================================
     if (showAuditDialog) {
-        // 1. Ensure AuditRecord captures the ID
         data class AuditRecord(val id: String, val email: String, val total: Int, val spam: Int, val firstDate: Long)
 
-        val userStats = allReports.groupBy { it.reporterEmail }.mapNotNull { (email, reports) ->
-            // --- NEW: Use empty string if missing, so old reports still show up in the UI
-            val reporterId = reports.firstOrNull()?.reporterId ?: ""
+        var auditTab by remember { mutableStateOf("ACTIVE") } // "ACTIVE" or "BANNED"
+        var databaseBannedEmails by remember { mutableStateOf(setOf<String>()) }
+        var newlyBannedEmails by remember { mutableStateOf(setOf<String>()) }
+        var newlyUnbannedEmails by remember { mutableStateOf(setOf<String>()) }
+        var isLoadingBanned by remember { mutableStateOf(true) }
 
+        LaunchedEffect(Unit) {
+            try {
+                // Fetch emails of all users who are currently banned in the database
+                val bannedList = supabase.from("users")
+                    .select {
+                        filter { eq("role", "BANNED") }
+                    }.decodeList<BannedUserDto>()
+
+                databaseBannedEmails = bannedList.map { it.email }.toSet()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                isLoadingBanned = false
+            }
+        }
+
+        val userStats = allReports.groupBy { it.reporterEmail }.mapNotNull { (email, reports) ->
+            val reporterId = reports.firstOrNull()?.reporterId ?: ""
             val total = reports.size
             val spamCount = reports.count { it.status == "REJECTED" }
             val firstDate = reports.minOfOrNull { it.timestamp } ?: System.currentTimeMillis()
@@ -634,93 +678,152 @@ fun ModeratorDashboardScreen(
             AuditRecord(reporterId, email ?: "Unknown User", total, spamCount, firstDate)
         }.sortedByDescending { it.spam }
 
-        // Local state to instantly hide the block button after clicking
-        var newlyBannedEmails by remember { mutableStateOf(setOf<String>()) }
+        // Determine who is currently banned based on DB state + local session toggles
+        val currentBannedEmails = (databaseBannedEmails + newlyBannedEmails) - newlyUnbannedEmails
+
+        // Filter the list based on the selected tab
+        val displayedUsers = if (auditTab == "ACTIVE") {
+            userStats.filter { !currentBannedEmails.contains(it.email) }
+        } else {
+            userStats.filter { currentBannedEmails.contains(it.email) }
+        }
 
         AlertDialog(
             onDismissRequest = { showAuditDialog = false },
             title = { Text("Citizen Trust & Audit Log", fontWeight = FontWeight.ExtraBold, color = Color(0xFF154360)) },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("Identify users submitting multiple fake or rejected reports.", fontSize = 12.sp, color = Color.Gray)
+                // fillMaxHeight constraints prevent the modal from pushing the Close button offscreen
+                Column(Modifier.fillMaxHeight(0.85f)) {
+                    Text("Review citizen reports and manage account access.", fontSize = 12.sp, color = Color.Gray)
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    if (userStats.isEmpty()) {
-                        Text("No user data available.")
+                    // --- TAB BUTTONS ---
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { auditTab = "ACTIVE" },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (auditTab == "ACTIVE") Color(0xFF154360) else Color(0xFFE0E0E0)),
+                            shape = RoundedCornerShape(4.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text("ACTIVE", color = if (auditTab == "ACTIVE") Color.White else Color.DarkGray, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+
+                        Button(
+                            onClick = { auditTab = "BANNED" },
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (auditTab == "BANNED") Color(0xFFC62828) else Color(0xFFE0E0E0)),
+                            shape = RoundedCornerShape(4.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text("BANNED", color = if (auditTab == "BANNED") Color.White else Color.DarkGray, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (isLoadingBanned) {
+                        Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = Color(0xFF154360))
+                        }
+                    } else if (displayedUsers.isEmpty()) {
+                        Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text(if (auditTab == "ACTIVE") "No active users to display." else "No banned accounts.", color = Color.Gray)
+                        }
                     } else {
-                        userStats.forEach { record ->
-                            val isBannedNow = newlyBannedEmails.contains(record.email)
-
-                            Card(
-                                Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                                colors = CardDefaults.cardColors(containerColor = if (record.spam > 2 || isBannedNow) Color(0xFFFFEBEE) else Color(0xFFF5F5F5))
-                            ) {
-                                Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                                    // TOP ROW: Details
-                                    Row(
-                                        Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(Modifier.weight(1f)) {
-                                            Text("👤 ${record.email}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Black)
-
-                                            val sdf = SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
-                                            val dateStr = sdf.format(java.util.Date(record.firstDate))
-
-                                            Text("Active since: $dateStr", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
-                                        }
-
-                                        Spacer(modifier = Modifier.width(8.dp))
-
-                                        Column(horizontalAlignment = Alignment.End) {
-                                            Text("Total: ${record.total}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
-                                            Text("Spam: ${record.spam}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (record.spam > 0) Color.Red else Color.DarkGray)
-                                        }
-                                    }
-
-                                    // BOTTOM ROW: Block Button
-                                    if (isBannedNow) {
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth().background(Color(0xFFFFCDD2), RoundedCornerShape(4.dp)).padding(8.dp),
-                                            contentAlignment = Alignment.Center
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            displayedUsers.forEach { record ->
+                                Card(
+                                    Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (auditTab == "BANNED") Color(0xFFFFEBEE) else if (record.spam > 2) Color(0xFFFFF3E0) else Color(0xFFF5F5F5)
+                                    )
+                                ) {
+                                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                                        // TOP ROW: Details
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("🔒 ACCOUNT BLOCKED", color = Color(0xFFC62828), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
-                                        }
-                                    } else if (record.spam > 0) {
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Button(
-                                            onClick = {
-                                                coroutineScope.launch {
-                                                    // --- NEW SAFETY CHECK ---
-                                                    if (record.id.isBlank()) {
-                                                        Toast.makeText(context, "Cannot block: This is an old report missing a User ID.", Toast.LENGTH_LONG).show()
-                                                        return@launch
-                                                    }
+                                            Column(Modifier.weight(1f)) {
+                                                Text("👤 ${record.email}", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Black)
 
-                                                    try {
-                                                        // TARGET THE 'id' COLUMN IN THE USERS TABLE
-                                                        supabase.from("users").update({
-                                                            set("role", "BANNED")
-                                                        }) {
-                                                            filter { eq("id", record.id) }
+                                                val sdf = SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault())
+                                                val dateStr = sdf.format(java.util.Date(record.firstDate))
+
+                                                Text("Active since: $dateStr", fontSize = 10.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
+                                            }
+
+                                            Spacer(modifier = Modifier.width(8.dp))
+
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text("Total: ${record.total}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.DarkGray)
+                                                Text("Spam: ${record.spam}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (record.spam > 0) Color.Red else Color.DarkGray)
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        // BOTTOM ROW: Block or Unblock Buttons based on Tab
+                                        if (auditTab == "ACTIVE") {
+                                            if (record.spam > 0) {
+                                                Button(
+                                                    onClick = {
+                                                        coroutineScope.launch {
+                                                            if (record.id.isBlank()) {
+                                                                Toast.makeText(context, "Cannot block: This is an old report missing a User ID.", Toast.LENGTH_LONG).show()
+                                                                return@launch
+                                                            }
+                                                            try {
+                                                                supabase.from("users").update({ set("role", "BANNED") }) { filter { eq("id", record.id) } }
+
+                                                                // Move user to the Banned list visually
+                                                                newlyBannedEmails = newlyBannedEmails + record.email
+                                                                newlyUnbannedEmails = newlyUnbannedEmails - record.email
+
+                                                                Toast.makeText(context, "User successfully blocked.", Toast.LENGTH_SHORT).show()
+                                                            } catch (e: Exception) {
+                                                                Toast.makeText(context, "Error blocking user: ${e.message}", Toast.LENGTH_LONG).show()
+                                                            }
                                                         }
-
-                                                        // Update UI instantly
-                                                        newlyBannedEmails = newlyBannedEmails + record.email
-                                                        Toast.makeText(context, "User successfully blocked.", Toast.LENGTH_SHORT).show()
-                                                    } catch (e: Exception) {
-                                                        Toast.makeText(context, "Error blocking user: ${e.message}", Toast.LENGTH_LONG).show()
-                                                    }
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                                                    modifier = Modifier.fillMaxWidth().height(35.dp),
+                                                    contentPadding = PaddingValues(0.dp),
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text("BLOCK USER", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                 }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                                            modifier = Modifier.fillMaxWidth().height(35.dp),
-                                            contentPadding = PaddingValues(0.dp),
-                                            shape = RoundedCornerShape(4.dp)
-                                        ) {
-                                            Text("BLOCK USER", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        } else {
+                                            // IF WE ARE IN THE BANNED TAB, SHOW UNBLOCK BUTTON
+                                            Button(
+                                                onClick = {
+                                                    coroutineScope.launch {
+                                                        if (record.id.isBlank()) {
+                                                            Toast.makeText(context, "Cannot unblock: Missing User ID.", Toast.LENGTH_LONG).show()
+                                                            return@launch
+                                                        }
+                                                        try {
+                                                            supabase.from("users").update({ set("role", "CITIZEN") }) { filter { eq("id", record.id) } }
+
+                                                            // Move user back to the Active list visually
+                                                            newlyUnbannedEmails = newlyUnbannedEmails + record.email
+                                                            newlyBannedEmails = newlyBannedEmails - record.email
+
+                                                            Toast.makeText(context, "User unblocked successfully.", Toast.LENGTH_SHORT).show()
+                                                        } catch (e: Exception) {
+                                                            Toast.makeText(context, "Error unblocking user: ${e.message}", Toast.LENGTH_LONG).show()
+                                                        }
+                                                    }
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)), // Green color for unblocking
+                                                modifier = Modifier.fillMaxWidth().height(35.dp),
+                                                contentPadding = PaddingValues(0.dp),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text("UNBLOCK USER", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                     }
                                 }
