@@ -22,7 +22,7 @@ To evaluate the system's Role-Based Access Control (RBAC) and validation logic, 
 
 **Moderator (LGU) Account:**
 *   **Email:** admin_lgu
-*   **Password:** admin123
+*   **Password:** ADMIN****
 *   **Passcode (for registration testing):** RtrabcPhenix
 *   *Access Rights:* Full access to the tactical map, incident verification queue, user audit logs, and data analytics export.
 
